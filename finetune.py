@@ -121,7 +121,7 @@ def load_data(tokenizer, params):
     combined_data = concatenate_datasets([dataset["validation"], dataset["test"]])
 
     # Split into training, validation, and test
-    train_indices, validation_test_indices = train_test_split(range(len(combined_data)), test_size=0.1, random_state=42, shuffle=True)
+    train_indices, validation_test_indices = train_test_split(range(len(combined_data)), test_size=0.2, random_state=42, shuffle=True)
 
     # Use integer indexing for the split
     train_data = combined_data.select(train_indices)
@@ -237,7 +237,7 @@ def load_data(tokenizer, params):
     return model
 
 def finetune(model, train_dataloader, eval_dataloader, params):
-    lr = 1e-6
+    lr = 1e-5
     device = next(model.parameters()).device
 
     # Define optimizer
@@ -327,8 +327,8 @@ def finetune(model, train_dataloader, eval_dataloader, params):
         eval_score = metric.compute()
         print(f'Epoch {epoch + 1}/{params.num_epochs}, Eval Accuracy: {eval_score["accuracy"]:.4f}')
 
-    progress_bar.close()
-    exit()
+    # progress_bar.close()
+    # exit()
     return model
 
 def test(model, test_dataloader, prediction_save='predictions.torch'):
@@ -336,21 +336,53 @@ def test(model, test_dataloader, prediction_save='predictions.torch'):
     model.eval()
     all_predictions = []
 
-    for batch in test_dataloader:
-        batch = {k: v.to(device) for k, v in batch.items()} #collect data to be inputted
+    # for batch in test_dataloader:
+    #     batch = {k: v.to(device) for k, v in batch.items()} #collect data to be inputted
+    #     with torch.no_grad():
+    #         outputs = model(**batch) #run model on data
+    #     logits = outputs.logits #extract the logits (raw scores before softmax)
+    #     prediction = torch.argmax(logits, dim=-1)#for each sample in the batch, classify
+    #                                               #it based on the logits
+    #     # all_predictions.extend(list(predictions)) #add predictions to a list
+    #     all_predictions.append(prediction.item())
+    #     print(prediction.item())
+    #     metric.add_batch(predictions=(logits > 0).long(), references=batch["labels"]) #add predictions and truth
+
+    # model = torch.load(prediction_save)
+    count = 0
+    all_outputs = []
+    all_labels = []
+    threshold = 0
+    # Evaluation
+    model.eval()
+    for eval_batch in test_dataloader:
+        eval_batch = {k: v.to(device) for k, v in eval_batch.items()}  # collect data to be inputted
         with torch.no_grad():
-            outputs = model(**batch) #run model on data
-        logits = outputs.logits #extract the logits (raw scores before softmax)
-        prediction = torch.argmax(logits, dim=-1)#for each sample in the batch, classify
-                                                  #it based on the logits
-        # all_predictions.extend(list(predictions)) #add predictions to a list
-        all_predictions.append(prediction.item())
-        metric.add_batch(predictions=prediction, references=batch["labels"]) #add predictions and truth
+            eval_outputs = model(**eval_batch)
+            eval_logits = eval_outputs.logits
+            eval_labels = eval_batch['labels'].float()
+            # metric.add_batch(predictions=(eval_logits > threshold).long(), references=eval_labels.long())
+    
+        all_outputs.append(eval_logits.item())
+        all_labels.append(eval_labels.item())
+
+    optimal_threshold = get_optimal_threshold(all_outputs, all_labels)
+    
+    for i in range(len(all_labels)):
+        if all_outputs[i] > optimal_threshold:
+            all_predictions.append(1.0)
+        else:
+            all_predictions.append(0.0)
+
+    print(all_outputs)
+    print(all_predictions)
+    print(all_labels)
+    for i in range(len(all_labels)):
+        metric.add(predictions=all_predictions[i], references=all_labels[i])
 
     score = metric.compute() #compare predictions to references
     print('Test Accuracy:', score)
-    print_predictions(all_predictions)
-    # torch.save(all_predictions, prediction_save) #save predictions
+    torch.save(all_predictions, prediction_save) #save predictions
 
 def checksum(model):
     s = 0.0
@@ -370,14 +402,27 @@ def print_predictions(predictions):
     print("True : ", num_true)
     print("False: ", num_false)
 
+def get_optimal_threshold(all_logits, all_labels):
+    import numpy as np
+    from sklearn.metrics import accuracy_score
+
+    # Find the threshold that maximizes accuracy
+    thresholds = np.unique(all_logits)
+    accuracies = [accuracy_score(all_labels, (all_logits > threshold).astype(int)) for threshold in thresholds]
+    optimal_threshold = thresholds[np.argmax(accuracies)]
+    print(f'Optimal Threshold for Accuracy: {optimal_threshold}')
+
+    return optimal_threshold
+
+
 def main(params):
     tokenizer = AutoTokenizer.from_pretrained(params.model)
     train_dataloader, validation_dataloader, test_dataloader = load_data(tokenizer, params)
 
     model = AutoModelForSequenceClassification.from_pretrained(params.model, num_labels=1)
     model.classifier = torch.nn.Linear(model.classifier.in_features, out_features=1)
-    # model.classifier.bias.data = torch.tensor([0.0], dtype=torch.float)
-    # model.classifier.weight.data = torch.tensor([[1.0]], dtype=torch.float)
+    model.classifier.bias.data = torch.tensor([0.0], dtype=torch.float)
+    model.classifier.weight.data = torch.tensor([[1.0] * model.config.hidden_size], dtype=torch.float)
     model.to(device)
 
     model = finetune(model, train_dataloader, validation_dataloader, params)
@@ -389,7 +434,7 @@ if __name__ == "__main__":
     # parser.add_argument("--model", type=str, default="xlnet-base-cased")
     parser.add_argument("--model", type=str, default="bert-base-uncased")
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--num_epochs", type=int, default=3)
+    parser.add_argument("--num_epochs", type=int, default=5)
     parser.add_argument("--max_length", type=int, default=None)
     parser.add_argument("--pad_to_multiple_of", type=int, default=None)
 
