@@ -42,41 +42,12 @@ class SimpleDataCollator:
 
 def load_data(tokenizer, params):
     label_ints = { "true": 1, "false": 0}
-
-    # def tokenize_function(data):
-    #     dialog_text_list = data['dialog_text_list']
-    #     speakers = data['dialog_speaker_list']
-    #     h = data['h']
-    #     labels = data['entailment']
-    #     input_texts = []
-
-    #     for speaker_list, dialog_list, curr_h in zip(speakers, dialog_text_list, h):
-    #         dialog = []
-    #         for speaker, sentence in zip(speaker_list, dialog_list):
-    #             s = "Speaker" + speaker
-    #             d = s + ": " + sentence + "/"
-    #             dialog.append(d)
-    #         dialog += " " + curr_h
-    #         input_texts.append(" ".join(dialog))
-
-    #     tokenized_example = tokenizer(
-    #         input_texts,
-    #         h,
-    #         truncation=True,
-    #         padding=True,
-    #         return_tensors='pt',
-    #     )
-
-    #     tokenized_example["labels"] = torch.tensor(labels, dtype=torch.bool).to(device)
-    #     return tokenized_example
     
     def tokenize_function(data):
         dialog_text_list = data['dialog_text_list']
         speakers = data['dialog_speaker_list']
         h = data['h']
         labels = data['entailment']
-        # print(torch.tensor(labels, dtype=torch.float32))
-        # exit()
 
         all_inputs = []
         curr_inputs = ""
@@ -92,17 +63,6 @@ def load_data(tokenizer, params):
             all_inputs.append(curr_inputs)
             curr_inputs = ""
 
-
-        # # count = 0        
-        # for speaker, dialog, curr_h in zip(speakers, dialog_text_list, h):
-        #     # Combine speaker, dialog, and h using [SEP] and [CLS]
-        #     input_text = f"[CLS] {speaker} [SEP] {' [SEP] '.join(dialog)} [SEP] {curr_h} [SEP]"
-        #     all_inputs.append(input_text)
-        #     # if count == 1:
-        #     #     print(input_text)
-        #     #     exit()
-        #     # count += 1
-
         tokenized_example = tokenizer(
             all_inputs,
             truncation=True,
@@ -116,15 +76,7 @@ def load_data(tokenizer, params):
         
         return tokenized_example
 
-
-    # dataset = load_dataset("sled-umich/Conversation-Entailment")
-    # combined_data = concatenate_datasets([dataset["validation"], dataset["test"]])
-    # exit()
-
     combined_data = load_dataset('csv', data_files='random_training_data.csv')['train']
-    # print(len(combined_data['train']))
-    # print(type(combined_data))
-    # exit()
 
     # Split into training, validation, and test
     train_indices, validation_test_indices = train_test_split(range(len(combined_data)), test_size=0.2, random_state=42, shuffle=True)
@@ -142,9 +94,6 @@ def load_data(tokenizer, params):
 
     # Set format to "torch"
     train_data = train_data.map(tokenize_function, batched=True)
-    # print(train_data['input_ids'][1:3])
-    # print(train_data['attention_mask'][1:3])
-    # print(train_data['labels'][1:3])
     train_data.set_format("torch")
     for key in train_data.features.keys():
         if key not in accepted_keys:
@@ -161,86 +110,12 @@ def load_data(tokenizer, params):
     for key in test_data.features.keys():
         if key not in accepted_keys:
             test_data = test_data.remove_columns(key)
-    # print(train_data)
-    # exit()
-
-    # Set up dataloaders ##########################################################
-
-    # data_collator = SimpleDataCollator(tokenizer)
-
-    # train_dataloader = DataLoader(train_data, collate_fn=data_collator)
-    # validation_dataloader = DataLoader(validation_data, collate_fn=data_collator)
-    # test_dataloader = DataLoader(test_data, collate_fn=data_collator)
-            
-            #///////////////////////////////////////////////////////////////////
 
     train_dataloader = DataLoader(train_data)
     validation_dataloader = DataLoader(validation_data)
     test_dataloader = DataLoader(test_data)
 
-    ###############################################################################
-
     return train_dataloader, validation_dataloader, test_dataloader
-
-# def finetune(model, train_dataloader, eval_dataloader, params):
-    num_training_steps = params.num_epochs * len(train_dataloader)
-    num_warmup_steps = 0
-    lr = 5e-5
-    # optimizer = AdamW(model.parameters(), lr=lr)
-    optimizer = SGD(model.parameters(), lr=lr)
-    
-    progress_bar = tqdm(range(num_training_steps))
-    metric = load_metric('accuracy')
-    
-    lr_scheduler = get_scheduler(
-        name="linear", 
-        optimizer=optimizer, 
-        num_warmup_steps=num_warmup_steps, 
-        num_training_steps=num_training_steps
-    )
-
-    loss_fn = torch.nn.BCEWithLogitsLoss()
-
-    print(checksum(model))
-    # print(loss)
-    for epoch in range(params.num_epochs):
-        model.train() #set model to training mode
-        for batch in train_dataloader:
-            batch = {k: v.to(device) for k, v in batch.items()} #collect data to be inputted
-            outputs = model(**batch) #run model on data
-            loss = loss_fn(outputs.logits, batch["labels"].float())  # gather loss (how well the model performed, lower = better)
-            loss.backward() #pass over the model, fixing it based on the loss
-
-            optimizer.step() #update model parameters to reduce loss as defined by the AdamW optimizer
-            optimizer.zero_grad() #zero out the loss to prepare for next loop iteration
-            lr_scheduler.step() #update the learning rate (linear decay)
-            progress_bar.update(1)
-        print("\r")
-    
-        print(checksum(model))
-        print(loss)
-
-        all_predictions = []
-
-        model.eval() #set model to evaluation mode
-        for batch in eval_dataloader:
-            batch = {k: v.to(device) for k, v in batch.items()} #collect data to be inputted
-            with torch.no_grad():
-                outputs = model(**batch) #run model on data
-
-            logits = outputs.logits #extract the logits (raw scores before softmax)
-            prediction = torch.argmax(logits, dim=-1) #for each sample in the batch, classify
-                                                       #it based on the logits
-
-            all_predictions.append(prediction.item())
-            metric.add_batch(predictions=prediction, references=batch["labels"]) #add predictions and truth
-
-        print(all_predictions)    
-        score = metric.compute() #compare predictions to references
-        print('Validation Accuracy:', score['accuracy'])
-        print_predictions(all_predictions)
-
-    return model
 
 def finetune(model, train_dataloader, eval_dataloader, params):
     lr = 1e-4
@@ -276,8 +151,6 @@ def finetune(model, train_dataloader, eval_dataloader, params):
             batch = {k: v.to(device) for k, v in batch.items()}  # collect data to be inputted
             outputs = model(**batch)  # run model on data
             logits = outputs.logits
-            # print(logits)
-            # exit()
             labels = batch['labels'].float().squeeze(1)  # Assuming labels are already in the batch
             loss = loss_fn(logits, labels)  # calculate loss
             loss.backward()  # backpropagation
@@ -289,16 +162,6 @@ def finetune(model, train_dataloader, eval_dataloader, params):
 
             all_outputs.append(logits.item())
             all_labels.append(labels.item())
-            # if count == 1:
-            # if logits.item() > 0.5:
-            #     print("\n\n HERE \n\n")
-            #     # print (all_outputs[690:694])
-            #     # print (all_labels[690:694])
-            #     print (all_outputs[count-2:])
-            #     print (all_labels[count-2:])
-            #     print(count)
-            #     exit()
-            # count += 1
 
         count = 0
         all_outputs = []
@@ -315,26 +178,10 @@ def finetune(model, train_dataloader, eval_dataloader, params):
                 metric.add_batch(predictions=(eval_logits > 0).long(), references=eval_labels.long())
             all_outputs.append(eval_logits.item())
             all_labels.append(eval_labels.item())
-            
-            # if count == 1:
-            # if logits.item() > 0.5:
-                # print("\n\n HERE \n\n")
-                # print (all_outputs[690:694])
-                # print (all_labels[690:694])
-                # print (all_outputs[count-2:])
-                # print (all_labels[count-2:])
-                # print(count)
-                # exit()
-            # count += 1
-        
-        print (all_outputs)
-        print (all_labels)
 
         eval_score = metric.compute()
         print(f'Epoch {epoch + 1}/{params.num_epochs}, Eval Accuracy: {eval_score["accuracy"]:.4f}')
 
-    # progress_bar.close()
-    # exit()
     return model
 
 def test(model, test_dataloader, prediction_save='predictions.torch'):
@@ -342,19 +189,6 @@ def test(model, test_dataloader, prediction_save='predictions.torch'):
     model.eval()
     all_predictions = []
 
-    # for batch in test_dataloader:
-    #     batch = {k: v.to(device) for k, v in batch.items()} #collect data to be inputted
-    #     with torch.no_grad():
-    #         outputs = model(**batch) #run model on data
-    #     logits = outputs.logits #extract the logits (raw scores before softmax)
-    #     prediction = torch.argmax(logits, dim=-1)#for each sample in the batch, classify
-    #                                               #it based on the logits
-    #     # all_predictions.extend(list(predictions)) #add predictions to a list
-    #     all_predictions.append(prediction.item())
-    #     print(prediction.item())
-    #     metric.add_batch(predictions=(logits > 0).long(), references=batch["labels"]) #add predictions and truth
-
-    # model = torch.load(prediction_save)
     count = 0
     all_outputs = []
     all_labels = []
@@ -367,7 +201,6 @@ def test(model, test_dataloader, prediction_save='predictions.torch'):
             eval_outputs = model(**eval_batch)
             eval_logits = eval_outputs.logits
             eval_labels = eval_batch['labels'].float().squeeze(1)
-            # metric.add_batch(predictions=(eval_logits > threshold).long(), references=eval_labels.long())
     
         all_outputs.append(eval_logits.item())
         all_labels.append(eval_labels.item())
@@ -380,9 +213,6 @@ def test(model, test_dataloader, prediction_save='predictions.torch'):
         else:
             all_predictions.append(0.0)
 
-    print(all_outputs)
-    print(all_predictions)
-    print(all_labels)
     for i in range(len(all_labels)):
         metric.add(predictions=all_predictions[i], references=all_labels[i])
 
