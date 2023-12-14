@@ -117,8 +117,14 @@ def load_data(tokenizer, params):
         return tokenized_example
 
 
-    dataset = load_dataset("sled-umich/Conversation-Entailment")
-    combined_data = concatenate_datasets([dataset["validation"], dataset["test"]])
+    # dataset = load_dataset("sled-umich/Conversation-Entailment")
+    # combined_data = concatenate_datasets([dataset["validation"], dataset["test"]])
+    # exit()
+
+    combined_data = load_dataset('csv', data_files='random_training_data.csv')['train']
+    # print(len(combined_data['train']))
+    # print(type(combined_data))
+    # exit()
 
     # Split into training, validation, and test
     train_indices, validation_test_indices = train_test_split(range(len(combined_data)), test_size=0.2, random_state=42, shuffle=True)
@@ -237,7 +243,7 @@ def load_data(tokenizer, params):
     return model
 
 def finetune(model, train_dataloader, eval_dataloader, params):
-    lr = 1e-5
+    lr = 1e-4
     device = next(model.parameters()).device
 
     # Define optimizer
@@ -272,7 +278,7 @@ def finetune(model, train_dataloader, eval_dataloader, params):
             logits = outputs.logits
             # print(logits)
             # exit()
-            labels = batch['labels'].float()  # Assuming labels are already in the batch
+            labels = batch['labels'].float().squeeze(1)  # Assuming labels are already in the batch
             loss = loss_fn(logits, labels)  # calculate loss
             loss.backward()  # backpropagation
 
@@ -304,7 +310,7 @@ def finetune(model, train_dataloader, eval_dataloader, params):
             with torch.no_grad():
                 eval_outputs = model(**eval_batch)
                 eval_logits = eval_outputs.logits
-                eval_labels = eval_batch['labels'].float()
+                eval_labels = eval_batch['labels'].float().squeeze(1)
                 eval_loss = loss_fn(eval_logits, eval_labels)
                 metric.add_batch(predictions=(eval_logits > 0).long(), references=eval_labels.long())
             all_outputs.append(eval_logits.item())
@@ -360,7 +366,7 @@ def test(model, test_dataloader, prediction_save='predictions.torch'):
         with torch.no_grad():
             eval_outputs = model(**eval_batch)
             eval_logits = eval_outputs.logits
-            eval_labels = eval_batch['labels'].float()
+            eval_labels = eval_batch['labels'].float().squeeze(1)
             # metric.add_batch(predictions=(eval_logits > threshold).long(), references=eval_labels.long())
     
         all_outputs.append(eval_logits.item())
@@ -420,7 +426,7 @@ def main(params):
     train_dataloader, validation_dataloader, test_dataloader = load_data(tokenizer, params)
 
     model = AutoModelForSequenceClassification.from_pretrained(params.model, num_labels=1)
-    model.classifier = torch.nn.Linear(model.classifier.in_features, out_features=1)
+    model.classifier = torch.nn.Linear(model.config.hidden_size, out_features=1)
     model.classifier.bias.data = torch.tensor([0.0], dtype=torch.float)
     model.classifier.weight.data = torch.tensor([[1.0] * model.config.hidden_size], dtype=torch.float)
     model.to(device)
@@ -432,9 +438,12 @@ def main(params):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Finetune Language Model")
     # parser.add_argument("--model", type=str, default="xlnet-base-cased")
-    parser.add_argument("--model", type=str, default="bert-base-uncased")
+    # parser.add_argument("--model", type=str, default="bert-base-uncased")
+    # parser.add_argument("--model", type=str, default="albert-base-v2")
+    # parser.add_argument("--model", type=str, default="roberta-base")
+    parser.add_argument("--model", type=str, default="microsoft/deberta-base")
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--num_epochs", type=int, default=5)
+    parser.add_argument("--num_epochs", type=int, default=3)
     parser.add_argument("--max_length", type=int, default=None)
     parser.add_argument("--pad_to_multiple_of", type=int, default=None)
 
