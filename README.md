@@ -1,1 +1,2 @@
 # eecs595_final_project
+The finetune.py file has our code in it. We use the SLED Lab Conversational Entailment dataset and a slimmed down version of the MNLI dataset. We also created our own dataset, but it did not have enough data to provide good results. The highest accuracy achieved on the SLED Lab dataset was 71.43%
